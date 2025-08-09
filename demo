@@ -1,0 +1,65 @@
+# 随机生成100行10列数据：X1..X6, Z1..Z3, Y1
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import KFold
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+from math import sqrt
+
+# ==== 1) 生成数据 ====
+rng = np.random.default_rng(42)
+data = rng.standard_normal((100, 10))  # 100x10, ~N(0,1)
+cols = [f"X{i}" for i in range(1, 7)] + [f"Z{i}" for i in range(1, 4)] + ["Y1"]
+df = pd.DataFrame(data, columns=cols)
+
+# ==== 2) 划分特征与目标 ====
+X = df[[f"X{i}" for i in range(1, 7)]].values  # 前6列
+y = df["Y1"].values                            # 目标
+Z = df[[f"Z{i}" for i in range(1, 4)]].values  # Z1..Z3（用于与常数1、2、3计算RMSE）
+
+# ==== 3) 定义模型与交叉验证 ====
+rf = RandomForestRegressor(n_estimators=300, random_state=0, n_jobs=-1)
+kf = KFold(n_splits=5, shuffle=True, random_state=0)
+
+# ==== 4) 5折交叉验证并计算综合损失（四个RMSE的平均）====
+rows = []
+for fold_idx, (tr, te) in enumerate(kf.split(X), start=1):
+    X_tr, X_te = X[tr], X[te]
+    y_tr, y_te = y[tr], y[te]
+    Z_te = Z[te]
+
+    rf.fit(X_tr, y_tr)
+    y_pred = rf.predict(X_te)
+
+    rmse_y1 = sqrt(mean_squared_error(y_te, y_pred))
+    rmse_z1 = sqrt(np.mean((Z_te[:, 0] - 1.0) ** 2))
+    rmse_z2 = sqrt(np.mean((Z_te[:, 1] - 2.0) ** 2))
+    rmse_z3 = sqrt(np.mean((Z_te[:, 2] - 3.0) ** 2))
+    composite = np.mean([rmse_y1, rmse_z1, rmse_z2, rmse_z3])
+
+    rows.append({
+        "fold": fold_idx,
+        "RMSE_Y1": rmse_y1,
+        "RMSE_Z1_vs_1": rmse_z1,
+        "RMSE_Z2_vs_2": rmse_z2,
+        "RMSE_Z3_vs_3": rmse_z3,
+        "Composite_Loss": composite
+    })
+
+results_df = pd.DataFrame(rows, columns=["fold","RMSE_Y1","RMSE_Z1_vs_1","RMSE_Z2_vs_2","RMSE_Z3_vs_3","Composite_Loss"])
+
+# ==== 5) 输出每折结果与总体均值 ====
+print("Per-fold results:")
+print(results_df.to_string(index=False))
+
+overall_means = {
+    "Mean_RMSE_Y1": results_df["RMSE_Y1"].mean(),
+    "Mean_RMSE_Z1_vs_1": results_df["RMSE_Z1_vs_1"].mean(),
+    "Mean_RMSE_Z2_vs_2": results_df["RMSE_Z2_vs_2"].mean(),
+    "Mean_RMSE_Z3_vs_3": results_df["RMSE_Z3_vs_3"].mean(),
+    "Mean_Composite_Loss": results_df["Composite_Loss"].mean()
+}
+
+print("\nOverall means:")
+for k, v in overall_means.items():
+    print(f"{k}: {v:.6f}")
